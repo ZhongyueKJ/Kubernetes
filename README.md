@@ -1,10 +1,1 @@
-# Kubernetes
-fasdfa
-fdasf
-fasdf
-afasf
-dfas
-fsa
-fsa
-fsaf
-safas
+# k8s的安装

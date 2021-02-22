@@ -1,0 +1,87 @@
+# cat /etc/hosts
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+192.168.116.128 k8s-master
+192.168.116.129 k8s-node1
+192.168.116.130 k8s-node2
+1.关闭防火墙：
+# systemctl stop firewalld
+# systemctl disable firewalld
+2.禁用SELinux：
+# setenforce 0
+# sed -i 's/SELINUX=permissive/SELINUX=disabled/' /etc/sysconfig/selinux
+3.关闭系统的Swap
+# swapoff -a
+修改/etc/fstab文件，注释掉SWAP的自动挂载，使用free -m确认swap已经关闭。
+3.1.注释掉swap分区：
+# sed -i 's/.*swap.*/#&/' /etc/fstab
+# free -m
+              total        used        free      shared  buff/cache   available
+Mem:           3935         144        3415           8         375        3518
+Swap:             0           0           0
+
+清理yum：
+# yum clean all && yum makecache fast
+
+配置资源限制，设置系统文件句柄数
+# cat << EOF >>/etc/security/limits.conf 
+* soft nofile 65536
+* hard nofile 65536
+* soft nproc 65536
+* hard nproc 65536
+* soft memlock  unlimited
+* hard memlock  unlimited
+EOF
+
+同步时间：
+systemctl start chronyd.service && systemctl enable chronyd.service
+
+设置内核参数
+# cat <<EOF > /etc/sysctl.d/k8s.conf
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 10
+EOF
+# modprobe br_netfilter   #挂载
+# sysctl -p /etc/sysctl.d/k8s.conf  #使配置文件生效
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 10
+# ls /proc/sys/net/bridge/   #查看生成文件
+bridge-nf-call-arptables  bridge-nf-call-iptables        bridge-nf-filter-vlan-tagged
+bridge-nf-call-ip6tables  bridge-nf-filter-pppoe-tagged  bridge-nf-pass-vlan-input-dev
+
+配置IPVS模块
+# cat <<EOF >>/etc/sysconfig/modules/ipvs.modules
+#!/bin/bash
+modprobe -- ip_vs
+modprobe -- ip_vs_rr
+modprobe -- ip_vs_wrr
+modprobe -- ip_vs_sh
+modprobe -- nf_conntrack_ipv4
+EOF
+# chmod 755 /etc/sysconfig/modules/ipvs.modules 
+# sh /etc/sysconfig/modules/ipvs.modules 
+# lsmod | grep -e ip_vs -e nf_conntrack_ipv4    #查看是否已经加载所需模块
+nf_conntrack_ipv4      15053  0 
+nf_defrag_ipv4         12729  1 nf_conntrack_ipv4
+ip_vs_sh               12688  0 
+ip_vs_wrr              12697  0 
+ip_vs_rr               12600  0 
+ip_vs                 145458  6 ip_vs_rr,ip_vs_sh,ip_vs_wrr
+nf_conntrack          139264  2 ip_vs,nf_conntrack_ipv4
+libcrc32c              12644  3 xfs,ip_vs,nf_conntrack
+如果net.bridge.bridge-nf-call-iptables报错，加载br_netfilter模块或者重启服务器
+# modprobe br_netfilter
+# sysctl -p /etc/sysctl.d/k8s.conf
+
+安装IPset、ipvsadm和一些依赖包及相关工具
+# yum install -y ipset ipvsadm
+# yum install -y epel-release
+# yum install -y yum-utils device-mapper-persistent-data lvm2 net-tools conntrack-tools libseccomp libtool-ltdl
